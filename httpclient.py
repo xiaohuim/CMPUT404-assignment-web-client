@@ -1,13 +1,13 @@
 #!/usr/bin/env python
 # coding: utf-8
-# Copyright 2016 Abram Hindle, https://github.com/tywtyw2002, and https://github.com/treedust
-# 
+# Copyright 2016 Abram Hindle, https://github.com/tywtyw2002, and https://github.com/treedust, Xiaohui Ma
+#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
-# 
+#
 #     http://www.apache.org/licenses/LICENSE-2.0
-# 
+#
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -33,20 +33,34 @@ class HTTPResponse(object):
         self.body = body
 
 class HTTPClient(object):
-    #def get_host_port(self,url):
+    def get_host_port(self,url):
+        #p = re.compile(r'^(https?://|)(?P<host>[^:/]+)(:(?P<port>\d+)|)(?P<path>(/.*|))$')
+        p = re.compile(r'^(https?://|)(?P<host>[^:/]+):?(?P<port>\d+?|)(?P<path>(/.*?|))(\?.*|)$')
+        m = p.match(url)
+        if m:
+            host = m.group('host')
+            port = int(m.group('port')) if m.group('port') else 80
+            path = m.group('path') if m.group('path') else '/'
+        else:
+            print("[Error] error parsing the url!")
+        return (host, port, path)
 
     def connect(self, host, port):
-        # use sockets!
+        self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.sock.connect((host, port))
         return None
 
     def get_code(self, data):
-        return None
+        search = re.search(r'HTTP/1\.. (?P<code>\d*)', data)
+        return search.group('code')
 
     def get_headers(self,data):
-        return None
+        search = re.search(r'(?P<headers>.+?)\r\n\r\n', data, re.DOTALL)
+        return search.group('headers')
 
     def get_body(self, data):
-        return None
+        search = re.search(r'.*?\r\n\r\n(?P<body>.*)', data, re.DOTALL)
+        return search.group('body')
 
     # read everything from the socket
     def recvall(self, sock):
@@ -61,21 +75,47 @@ class HTTPClient(object):
         return str(buffer)
 
     def GET(self, url, args=None):
-        code = 500
-        body = ""
+        host, port, path = self.get_host_port(url)
+        #print host, port, path
+        self.connect(host, port)
+        request = "GET %s HTTP/1.1\r\nHost: %s\r\nConnection: close\r\n\r\n" % (path, host)
+        self.sock.sendall(request)
+        data = self.recvall(self.sock)
+        self.sock.close()
+        headers = self.get_headers(data)
+        code = int(self.get_code(headers))
+        body = self.get_body(data)
+        #print body
         return HTTPResponse(code, body)
 
     def POST(self, url, args=None):
-        code = 500
-        body = ""
+        host, port, path = self.get_host_port(url)
+        if args!=None:
+            post_data = urllib.urlencode(args)
+        self.connect(host, port)
+        request = "POST %s HTTP/1.1\r\nHost: %s\r\n" % (path, host)
+        if args!=None:
+            request += "Content-Type: application/x-www-form-urlencoded\r\n"
+        if args!=None:
+            request += "Content-Length: %d\r\n" % len(post_data)
+        request += "Connection: close\r\n\r\n"
+        if args!=None:
+            request += post_data
+        self.sock.sendall(request)
+        data = self.recvall(self.sock)
+        self.sock.close()
+        headers = self.get_headers(data)
+        code = int(self.get_code(headers))
+        body = self.get_body(data)
+        print headers, body
         return HTTPResponse(code, body)
 
-    def command(self, url, command="GET", args=None):
+    def command(self, command, url, args=None):
         if (command == "POST"):
             return self.POST( url, args )
         else:
             return self.GET( url, args )
-    
+
 if __name__ == "__main__":
     client = HTTPClient()
     command = "GET"
